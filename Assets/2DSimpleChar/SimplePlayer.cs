@@ -1,10 +1,11 @@
 using UnityEngine;
-using UnityEngine.UIElements.Experimental;
 
 public class SimplePlayer : MonoBehaviour //library สำหรับช่วง gameplay
 {
     private Rigidbody2D rigid; // component rigidbody2D
     private Animator anim; // component animator
+    private ParticleSystem grassPar; // particle
+    private ParticleSystem.EmissionModule emission; // ข้อมูลสำหรับควบคุมการ emission ของ particle
 
     [Header("Ground And Wall Check")]
     [SerializeField] private float groundDistCheck = 1f; // ระยะ sensor ตรวจหาพื้น
@@ -14,28 +15,30 @@ public class SimplePlayer : MonoBehaviour //library สำหรับช่ว�
     public bool isWalled = false; // เจอผนัง ?
 
     [Header("Move")]
-    [SerializeField] public float moveSpeed = 5f;
-    public float X_input;
-    public float Y_input;
-    public int facing = 1;
+    [SerializeField] private float moveSpeed = 5f; // ความเร็ว player แนวราบ
+    public float X_input; // ปุ่ม a,d
+    public float Y_input; // ปุ่ม s ใช้ตอนเร่งความเร็ว wallSliding
+    public int facing = 1; // ใช้หันออกจากกำแพงเวลาโดด wallJumping
 
     [Header("Jump")]
-    [SerializeField] private float jumpForce = 20f;
-    [SerializeField] private Vector2 wallJumpForce = new Vector2(10, 15f);
+    [SerializeField] private float jumpForce = 20f; // แรงกระโดด
+    [SerializeField] private Vector2 wallJumpForce = new Vector2(10f, 15f); // แรงกระโดด wallJump
     public bool isJumping = false;
     public bool isWallJumping = false;
     public bool isWallSliding = false;
     public bool canDoubleJump = false;
 
-    [SerializeField] private float coyoteTimeLimit = 0.5f;
-    [SerializeField]private float bufferTimeLimit = 0.5f;
+    [SerializeField] private float coyoteTimeLimit = .5f;
+    [SerializeField] private float bufferTimeLimit = .5f;
     public float coyoteTime;
     public float bufferTime;
 
     private void Awake() // Awake() ทำก่อน Start() 
     {
         rigid = GetComponent<Rigidbody2D>(); // ดึงจากตัวมันเอง
-        anim = GetComponentInChildren<Animator>(); // InChildren เพราะดึงจากลูมัน
+        anim = GetComponentInChildren<Animator>(); // InChildren เพราะดึงจากลูกมัน
+        grassPar = GetComponentInChildren<ParticleSystem>(); // ดึง particle จากลูก
+        emission = grassPar.emission; // ดึงข้อมูล emission จาก particle
     }
     private void Update() // method ที่รันทุก frame
     {
@@ -48,130 +51,132 @@ public class SimplePlayer : MonoBehaviour //library สำหรับช่ว�
         GroundAndWallCheck(); // ตรวจพื้นกับผนัง
         Animation(); // สั่งให้ play Animation
     }
-    private void JumpState()
+    private void JumpState() // ดูว่าตัวละครสถานะเป็นยังไง
     {
-        if(!isGrounded && !isJumping)
+        if(!isGrounded && !isJumping) //  takeoff, fall
         {
             isJumping = true;
-            if(rigid.linearVelocityY <= 0f)
+            if(rigid.linearVelocityY <= 0f) // fall
             {
-                coyoteTime = Time.time;
-            } 
-        }
-        if(isGrounded && isJumping)
-        {
-            isJumping = false ;
-            isWallJumping = false ;
-            isWallSliding = false ;
+                coyoteTime = Time.time; // เริ่มจับเวลา coyote
+            }
         }
 
-        if (isWalled)
+        if(isGrounded && isJumping) // landing
+        {
+            isJumping = false; // หยุดกระโดด
+            isWallJumping = false;
+            isWallSliding = false;
+            canDoubleJump = false;
+        }
+
+        if (isWalled) // wallSliding
         {
             isJumping = false;
-            isWallJumping = false ;
+            isWallJumping = false;
             canDoubleJump = false;
 
-            if (isGrounded)
+            if (isGrounded) // ถ้าชนพื้น
             {
-                isWallSliding = false ;
+                isWallSliding = false;
             }
-            else
+            else // ถ้าไม่ชนพื้น
             {
                 isWallSliding = true;
             }
         }
-        else
+        else // ถ้าไม่ติดผนัง
         {
             isWallSliding = false;
         }
     }
     private void Jump()
     {
-        if (Input.GetKeyDown(KeyCode.Space))
+        if (Input.GetKeyDown(KeyCode.Space)) // กด spacebar
         {
-            if (!isWalled)
+            if (!isWalled) // ถ้าไม่ติดผนัง
             {
-                if (isGrounded)
+                if(isGrounded) // ถ้าอยู่บนพื้น **normalJump
                 {
-                    canDoubleJump = true ;
-                    rigid.linearVelocity = new Vector2(rigid.linearVelocityX, jumpForce);
+                    canDoubleJump = true; // โดด doubleJump ได้ 1 ครั้ง
+                    rigid.linearVelocity = new Vector2(rigid.linearVelocityX, jumpForce); // กระโดด
                 }
-                else
+                else // ถ้าไม่อยู่บนพื้น
                 {
-                    if(rigid.linearVelocityY > 0f)
+                    if(rigid.linearVelocityY > 0f && canDoubleJump) // กำลังลอยขึ้น ***doubleJump
                     {
-                        canDoubleJump = false ;
-                        rigid.linearVelocity = new Vector2(rigid.linearVelocityX, jumpForce);
+                        canDoubleJump = false; // โดดซ้ำอีกทีไม่ได้
+                        rigid.linearVelocity = new Vector2(rigid.linearVelocityX, jumpForce); // กระโดด
                     }
-
-                    if(rigid.linearVelocityY <= 0f)
+                     
+                    if(rigid.linearVelocityY <= 0f) // ถ้ากำลังตกลง coyoteJump, bufferJump
                     {
-                        if(Time.time < coyoteTime + coyoteTimeLimit)
+                        if(Time.time < coyoteTime + coyoteTimeLimit) // *** coyoteJump
                         {
-                            coyoteTime = 0f;
-                            rigid.linearVelocity = new Vector2(rigid.linearVelocityX, jumpForce);
+                            coyoteTime = 0f; // จับเวลาใหม่ ทำให้โดดซ้ำไม่ได้
+                            rigid.linearVelocity = new Vector2(rigid.linearVelocityX, jumpForce); // กระโดด
                         }
-                        else
+                        else // ถ้าตกและเลยเวลาของ coyote จะเริ่มนับเวลา bufferJump
                         {
-                            bufferTime = Time.time;
+                            bufferTime = Time.time; // เริ่มจับเวลา
                         }
                     }
                 }
             }
-            else
+            else // อยู่ติดผนัง แสดงว่าเป็น wallJump
             {
                 isWallJumping = true;
-                rigid.linearVelocity = new Vector2(wallJumpForce.x * facing, wallJumpForce.y);
+                rigid.linearVelocity = new Vector2(wallJumpForce.x * facing, wallJumpForce.y); // ***wallJump
             }
         }
-        else
+        else // ถ้าไม่กด spacebar แสดงว่าเป็น bufferJump
         {
-            if(isGrounded && Time.time < bufferTime + bufferTimeLimit)
+            if (isGrounded && Time.time < bufferTime + bufferTimeLimit) // ***bufferJump
             {
-                bufferTime = 0f;
-                rigid.linearVelocity = new Vector2(rigid.linearVelocityX, jumpForce);
+                bufferTime = 0f; // reset เวลาใหม่
+                rigid.linearVelocity = new Vector2(rigid.linearVelocityX, jumpForce); // กระโดด 
             }
-            
         }
     }
     private void WallSlide()
     {
-        if (!isWalled || isGrounded || isWallJumping || rigid.linearVelocityY > 0f)
-            return;
-        float Y_slide = Y_input < 0f ? 1f : 0.5f;
+        if (!isWalled || isGrounded || isWallJumping || rigid.linearVelocityY > 0f )
+            return; // ข้าม code ข้างล่างไป
+
+        float Y_slide = Y_input < 0f ? 1f : 0.5f; // ถ้ากด s จะเร็ว ไม่กดจะช้า
         rigid.linearVelocity = new Vector2(X_input * moveSpeed, rigid.linearVelocityY * Y_slide);
     }
     private void InputVal()
     {
-        X_input = Input.GetAxisRaw("Horizontal");
-        Y_input = Input.GetAxisRaw("Vertical");
+        X_input = Input.GetAxisRaw("Horizontal"); // ปุ่ม a,d
+        Y_input = Input.GetAxisRaw("Vertical"); // ปุ่ม w,s
     }
     private void Move()
     {
-        if (isWallJumping)
-            return;
-        if (isGrounded)
+        if (isWallJumping) // ถ้า wallJumping อยู่จะควบคุมตัวละครไม่ได้
+            return; // ให้ข้ามบรรทัดล่างไปเลย
+        if (isGrounded) // ถ้าอยู่บนพื้น
         {
-            rigid.linearVelocity = new Vector2(X_input * moveSpeed ,rigid.linearVelocityY);
+            rigid.linearVelocity = new Vector2(X_input * moveSpeed, rigid.linearVelocityY); // แรงผลักตัวละครให้เคลื่อนที่
         }
-        else
+        else // ถ้าลอยกลางอากาศ
         {
-            float X_airMove = X_input != 0f ? X_input * moveSpeed : rigid.linearVelocityX;
+            float X_airMove = X_input != 0f ? X_input * moveSpeed : rigid.linearVelocityX; // ถ้ากดหรือไม่กด a,d
+
             rigid.linearVelocity = new Vector2(X_airMove, rigid.linearVelocityY);
         }
-        
     }
     private void Flip()
     {
-        if (rigid.linearVelocityX > 0.1f)
+        if(rigid.linearVelocityX > 0.1f) // ถ้าผลักไปทางขวา
         {
-            facing = -1;
-            transform.rotation = Quaternion.Euler(0f,0f,0f);
+            facing = -1; // หันตรงข้ามกับกำแพง wallJump
+            transform.rotation = Quaternion.Euler(0f, 0f, 0f); // หันไปทางขวา
         }
-        else if (rigid.linearVelocityX < -0.1f)
+        if (rigid.linearVelocityX < -0.1f) // ถ้าผลักไปทางซ้าย
         {
             facing = 1;
-            transform.rotation = Quaternion.Euler(0f, 180f, 0f);
+            transform.rotation = Quaternion.Euler(0f, 180f, 0f); // หันไปทางซ้าย
         }
     }
     private void GroundAndWallCheck()
@@ -189,6 +194,11 @@ public class SimplePlayer : MonoBehaviour //library สำหรับช่ว�
     }
     private void Animation()
     {
+        anim.SetBool("isGrounded", isGrounded); // เลือกว่าจะ idle/run หรือ jump
+        anim.SetBool("isWallSliding", isWallSliding); // เลือกว่าจะ wallSlide หรือเปล่า
+        anim.SetFloat("velX", rigid.linearVelocityX); // เลือกว่าจะ idle/run
+        anim.SetFloat("velY", rigid.linearVelocityY); // เลือกว่าจะ โดดขึ้นหรือลง
 
+        emission.enabled = isGrounded; // ถ้าอยู่ที่พื้นให้ปล่อย particle
     }
 }
